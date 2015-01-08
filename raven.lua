@@ -144,72 +144,23 @@ local function backtrace(level)
          break
       end
 
-      table_insert(frames, 1, {
-         filename = info.short_src,
-         ["function"] = info.name,
-         lineno = info.currentline,
+      table_insert(frames, #frames + 1, {
+         file = info.short_src,
+         ["method"] = info.name,
+         lineNumber = info.currentline,
       })
 
       level = level + 1
    end
-   return { frames = frames }
+   return frames
 end
 
--- _parse_host_port: parse long host ("127.0.0.1:2222")
--- to host ("127.0.0.1") and port (2222)
-local function _parse_host_port(protocol, host)
-   local i = string_find(host, ":")
-   if not i then
-      -- TODO
-      return host, 80
-   end
-
-   local port_str = string_sub(host, i + 1)
-   local port = tonumber(port_str)
-   if not port then
-      return nil, nil, "illegal port: " .. port_str
-   end
-
-   return string_sub(host, 1, i - 1), port
-end
-_M._parse_host_port = _parse_host_port
-
--- _parse_dsn: gets protocol, public_key, secret_key, host, port, path and
--- project from DSN
-local function _parse_dsn(dsn, obj)
-   if not obj then
-      obj = {}
-   end
-
-   assert(type(obj) == "table")
-
-   -- '{PROTOCOL}://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PATH}{PROJECT_ID}'
-   obj.protocol, obj.public_key, obj.secret_key, obj.long_host,
-         obj.path, obj.project_id =
-         string_match(dsn, "^([^:]+)://([^:]+):([^@]+)@([^/]+)(.*/)(.+)$")
-
-   if obj.protocol and obj.public_key and obj.secret_key and obj.long_host
-         and obj.project_id then
-
-      local host, port, err = _parse_host_port(obj.protocol, obj.long_host)
-
-      if not host or not port then
-         return nil, err
-      end
-
-      obj.host = host
-      obj.port = port
-
-      obj.request_uri = obj.path .. "api/" .. obj.project_id .. "/store/"
-      obj.server = obj.protocol .. "://" .. obj.long_host .. obj.request_uri
-
-      return obj
-   end
-
-   return nil, "failed to parse DSN string"
-end
-_M._parse_dsn = _parse_dsn
-
+local notifier = {
+   name = "Bugsnag Lua",
+   version = "0.1",
+   url = "https://github.com/APItools/bugsnag-lua"
+}
+_M.notifier = notifier
 --- Create a new Sentry client. Three parameters:
 -- @param self raven client
 -- @param dsn  The DSN of the Sentry instance with this format:
@@ -225,21 +176,22 @@ _M._parse_dsn = _parse_dsn
 -- local raven = require "raven"
 -- local rvn = raven:new(dsn, { tags = { foo = "bar", abc = "def" },
 --     logger = "myLogger" })
-function _M.new(self, dsn, conf)
-   if not dsn then
-      return nil, "empty dsn"
+function _M.new(self, apiKey, conf)
+   if not apiKey then
+      return nil, "empty apiKey"
    end
 
    local obj = {}
 
-   local ok, err = _parse_dsn(dsn, obj)
-   if not ok then
-      return nil, err
-   end
-
-   obj.client_id = "raven-lua/0.4"
+   obj.client_id = "bugsnag-lua/0.1"
+   obj.apiKey = apiKey
    -- default level "error"
    obj.level = "error"
+   obj.host = 'notify.bugsnag.com'
+   obj.port = 80
+   obj.protocol = 'http'
+   obj.request_uri = '/'
+   obj.notifier = notifier
 
    if conf then
       if conf.tags then
@@ -299,16 +251,12 @@ function _M.captureException(self, exception, conf)
 
    clear_tab(_json)
    exception[1].stacktrace = backtrace(trace_level)
-   _json.exception = exception
-   _json.message = exception[1].value
-
-   _json.culprit = self.get_culprit(conf.trace_level)
-
+   -- _json.culprit = self.get_culprit(conf.trace_level)
 
    -- because whether tail call will or will not appear in the stack back trace
    -- is different between PUC-lua or LuaJIT, so just avoid tail call
-   local id, err = self:send_report(_json, conf)
-   return id, err
+   local ok, err = self:send_report(exception[1], conf)
+   return ok, err
 end
 
 --- Send a message to Sentry.
@@ -339,12 +287,12 @@ function _M.captureMessage(self, message, conf)
    end
 
    clear_tab(_json)
-   _json.message = message
+   local exception = { message = message }
 
-   _json.culprit = self.get_culprit(conf.trace_level)
+   -- _json.culprit = self.get_culprit(conf.trace_level)
 
-   local id, err = self:send_report(_json, conf)
-   return id, err
+   local ok, err = self:send_report(exception, conf)
+   return ok, err
 end
 
 -- send_report: send report for the captured error.
@@ -352,57 +300,60 @@ end
 -- Parameters:
 --   json: json table to be sent. Don't need to fill event_id, culprit,
 --   timestamp and level, send_report will fill these fields for you.
-function _M.send_report(self, json, conf)
+function _M.send_report(self, exception, conf)
    local event_id = uuid4()
+
+   local payload = {
+      apiKey  = self.apiKey,
+      notifier  = self.notifier
+   }
 
    -- TODO: Why is this line commented out?
    --json.project   = self.project_id,
 
-   if not json then
-      json = self.json
-      if not json then
+   if not exception then
+      exception = self.exception
+      if not exception then
          return
       end
    end
 
-   json.event_id  = event_id
-   json.timestamp = iso8601()
-   json.level     = self.level
-   json.tags      = self.tags
-   json.platform  = "lua"
-   json.logger    = "root"
+   local event = {
+      exceptions = { exception }
+   }
+   payload.events = { event }
+
+   event.payloadVersion = '2'
+   -- exception.timestamp = iso8601()
+   -- payload.level     = self.level
+   -- payload.tags      = self.tags
+   -- payload.platform  = "lua"
+   -- payload.logger    = "root"
 
    if conf then
       if conf.tags then
-         if not json.tags then
-            json.tags = { conf.tags }
+         if not payload.tags then
+            payload.tags = { conf.tags }
          else
-            json.tags[#json.tags + 1] = conf.tags
+            payload.tags[#payload.tags + 1] = conf.tags
          end
       end
 
       if conf.level then
-         json.level = conf.level
+         payload.level = conf.level
       end
    end
 
-   json.server_name = _get_server_name()
+   -- payload.server_name = _get_server_name()
 
-   local json_str = json_encode(json)
-   local ok, err
-   if self.protocol == "udp" then
-      ok, err = self:udp_send(json_str)
-   elseif self.protocol == "http" then
-      ok, err = self:http_send(json_str)
-   else
-      error("protocol not implemented yet: " .. self.protocol)
-   end
+   local json_str = json_encode(payload)
+   local ok, err = self:http_send(json_str)
 
    if not ok then
       errlog("Failed to send to Sentry: ", err, " ",  json_str)
       return nil, err
    end
-   return json.event_id
+   return ok
 end
 
 -- get culprit using given level
@@ -426,16 +377,14 @@ function _M.catcher(self, err)
    end
 
    clear_tab(_exception[1])
-   _exception[1].value = err
+   local file, message = _M.split_error(err)
+   _exception[1].errorClass = message
    _exception[1].stacktrace = backtrace(catcher_trace_level)
+   _exception[1].groupingHash = file
 
    clear_tab(_json)
-   _json.exception = _exception
-   _json.message = _exception[1].value
 
-   _json.culprit = self.get_culprit(catcher_trace_level)
-
-   return _json
+   return _exception[1]
 end
 
 --- Call function f with parameters ... wrapped in a xpcall and
@@ -487,56 +436,17 @@ function _M.gen_capture_err(self)
    end
 end
 
--- UDP request template
-local xsentryauth_udp="Sentry sentry_version=2.0,sentry_client=%s,"
-      .. "sentry_timestamp=%s,sentry_key=%s,sentry_secret=%s\n\n%s\n"
-
 -- HTTP request template
-local xsentryauth_http = "POST %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %d\r\nUser-Agent: %s\r\nX-Sentry-Auth: Sentry sentry_version=5, sentry_client=%s, sentry_timestamp=%s, sentry_key=%s, sentry_secret=%s\r\n\r\n%s"
-
--- udp_send: actually sends the structured data to the Sentry server using
--- UDP
-function _M.udp_send(self, json_str)
-   local ok, err
-
-   if not self.sock then
-      local sock = socket.udp()
-
-      if sock then
-         ok, err = sock:setpeername(self.host, self.port)
-         if not ok then
-            return nil, err
-         end
-         self.sock = sock
-      end
-   end
-
-   local bytes
-
-   if self.sock then
-      local content = string_format(xsentryauth_udp,
-                                   self.client_id,
-                                   iso8601(),
-                                   self.public_key,
-                                   self.secret_key,
-                                   json_str)
-      bytes, err = self.sock:send(content)
-   end
-   return bytes, err
-end
+local xsentryauth_http = "POST %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %d\r\nUser-Agent: %s\r\n\r\n%s"
 
 -- http_send_core: do the actual network send. Expects an already
 -- connected socket.
 function _M.http_send_core(self, json_str)
    local req = string_format(xsentryauth_http,
                                 self.request_uri,
-                                self.long_host,
+                                self.host,
                                 #json_str,
                                 self.client_id,
-                                self.client_id,
-                                iso8601(),
-                                self.public_key,
-                                self.secret_key,
                                 json_str)
    local bytes, err = self.sock:send(req)
    if not bytes then
@@ -584,51 +494,55 @@ function _M.http_send(self, json_str)
 end
 
 -- test client’s configuration from CLI
-local function raven_test(dsn)
-   local rvn, err = _M.new(_M, dsn, { tags = { source = "CLI test DSN" }})
+local function bugsnag_test(apiKey)
+   local bugsnag, err = _M.new(_M, apiKey, { tags = { source = "CLI test DSN" }})
 
-   if not rvn then
+   if not bugsnag then
       print(err)
    end
 
-   print(string_format("Using DSN configuration:\n  %s\n", dsn))
+   print(string_format("Using api key:\n  %s\n", apiKey))
    print(string_format([[Client configuration:
-  Servers        : ['%s']
-  project        : %s
-  public_key     : %s
+  Host        : %s
+  Port        : %s
+  Protocol    : %s
   secret_key     : %s
-]], rvn.server, rvn.project_id, rvn.public_key, rvn.secret_key))
+]], bugsnag.host, bugsnag.port, bugsnag.protocol, bugsnag.secret_key))
    print("Send a message...")
    local msg = "Hello from raven-lua!"
-   local id, err = rvn:captureMessage(msg)
+   local ok, err = bugsnag:captureMessage(msg)
 
-   if id then
+   if ok then
       print("success!")
-      print("Event id was '" .. id .. "'")
    else
       print("failed to send message '" .. msg .. "'\n" .. tostring(err))
    end
 
    print("Send an exception...")
    local exception = {{
-     ["type"] = "SyntaxError",
-     ["value"] = "Wattttt!",
-     ["module"] = "__builtins__"
+     ["errorClass"] = "SyntaxError",
+     ["message"] = "Wattttt!",
+     --["module"] = "__builtins__"
    }}
-   local id, err = rvn:captureException(exception)
+   local ok, err = bugsnag:captureException(exception)
 
-   if id then
+   if ok then
       print("success!")
-      print("Event id was '" .. id .. "'")
    else
-      print("failed to send message '" .. msg .. "'\n" .. err)
+      print("failed to send message '" .. msg .. "'\n" .. tostring(err))
    end
+
+   bugsnag:call(function()
+      print('error ' .. nil)
+      print('failed')
+   end)
+
    print("All done.")
 end
 
 if arg and arg[1] and arg[1] == "test" then
-   local dsn = arg[2]
-   raven_test(dsn)
+   local apiKey = arg[2]
+   bugsnag_test(apiKey)
 end
 
 return _M
