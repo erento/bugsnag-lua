@@ -439,12 +439,12 @@ function _M.gen_capture_err(self)
 end
 
 -- HTTP request template
-local xsentryauth_http = "POST %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %d\r\nUser-Agent: %s\r\n\r\n%s"
+local http_request_template = "POST %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %d\r\nUser-Agent: %s\r\n\r\n%s"
 
 -- http_send_core: do the actual network send. Expects an already
 -- connected socket.
 function _M.http_send_core(self, json_str)
-   local req = string_format(xsentryauth_http,
+   local req = string_format(http_request_template,
                                 self.request_uri,
                                 self.host,
                                 #json_str,

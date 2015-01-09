@@ -1,0 +1,9 @@
+language: c
+script: make
+before_install:
+- sudo apt-get install -y luarocks
+install:
+- sudo luarocks install lunit
+- sudo luarocks install luaposix
+- sudo luarocks install luasocket
+- sudo luarocks install lua-cjson
