@@ -194,12 +194,8 @@ function _M.new(self, apiKey, conf)
    obj.notifier = notifier
 
    if conf then
-      if conf.tags then
-         obj.tags = { conf.tags }
-      end
-
-      if conf.logger then
-         obj.logger = conf.logger
+      for key,value in pairs(conf) do
+         obj[key] = value
       end
    end
 
@@ -370,6 +366,12 @@ function _M.get_culprit(level)
    return culprit
 end
 
+function _M.split_error(exception)
+   -- extract message from errors like: "raven.lua:545: attempt to concatenate a nil value"
+   local file,message = string_match(exception, '^([^%.]+%.%w+):%d+:%s*(.+)$')
+   return file,message
+end
+
 -- catcher: used to catch an error from xpcall.
 function _M.catcher(self, err)
    if debug then
@@ -424,13 +426,13 @@ end
 
 function _M.gen_capture_err(self)
    return function (err)
-      local ok, json_exception = pcall(self.catcher, self, err)
+      local ok, exception = pcall(self.catcher, self, err)
       if not ok then
-         -- when failed, json_exception is error message
-         errlog(json_exception)
-         self.json = nil
+         -- when failed, exception is error message
+         errlog(exception)
+         self.exception = nil
       else
-         self.json = json_exception
+         self.exception = exception
       end
       return err
    end
