@@ -1,45 +1,40 @@
-raven-lua
+bugsnag-lua [![Build Status](https://travis-ci.org/APItools/bugsnag-lua.svg?branch=master)](https://travis-ci.org/APItools/bugsnag-lua)
 =========
 
-A small Lua interface to [Sentry](http://sentry.readthedocs.org/) that supports
-both the HTTP and UDP interfaces and also has a helpful wrapper function
+A small Lua interface to [Bugsnag](http://bugsnag.com/) that supports
+the HTTP notification interface and also has a helpful wrapper function
 `call()` that takes any arbitrary Lua function (with arguments) and executes
-it, traps any errors and reports it automatically to Sentry.
+it, traps any errors and reports it automatically to Bugsnag.
 
 Synopsis
 ========
 
 ```lua
 
-    local raven = require "raven"
+    local bugsnag = require "bugsnag"
 
-    -- Both HTTP protocol and UDP protocol are supported. For example:
-    -- http://pub:secret@127.0.0.1:8080/sentry/proj-id
-    -- udp://pub:secret@127.0.0.1:8080/sentry/proj-id
-    local rvn = raven:new("http://pub:secret@127.0.0.1:8080/sentry/proj-id", {
-       tags = { foo = "bar" },
-    })
+    local bug = bugsnag:new("api-key")
 
     -- Send a message to sentry
-    local id, err = rvn:captureMessage(
+    local ok, err = bug:captureMessage(
       "Sentry is a realtime event logging and aggregation platform.",
       { tags = { abc = "def" } } -- optional
     )
-    if not id then
+    if not ok then
        print(err)
     end
 
     -- Send an exception to sentry
     local exception = {{
-       ["type"]= "SyntaxError",
+       ["errorClass"]= "SyntaxError",
        ["value"]= "Wattttt!",
        ["module"]= "__builtins__"
     }}
-    local id, err = rvn:captureException(
+    local ok, err = bug:captureException(
        exception,
        { tags = { abc = "def" } } -- optional
     )
-    if not id then
+    if not ok then
        print(err)
     end
 
@@ -49,7 +44,7 @@ Synopsis
     end
 
     -- variable 'ok' should be false, and an exception will be sent to sentry
-    local ok = rvn:call(bad_func, 1)
+    local ok = bug:call(bad_func, 1)
 
 ```
 Documents
