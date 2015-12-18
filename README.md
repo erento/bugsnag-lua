@@ -11,9 +11,9 @@ Synopsis
 
 ```lua
 
-    local bugsnag = require "bugsnag"
+    local bugsnag = require "raven"
 
-    local bug = bugsnag:new("api-key")
+    local bug = bugsnag:new("api-key", {app = { version = "0.0.1"}})
 
     -- Send a message to sentry
     local ok, err = bug:captureMessage(
@@ -62,4 +62,3 @@ Prerequisites
     #for generating docs
     $luarocks install ldoc
 ```
-

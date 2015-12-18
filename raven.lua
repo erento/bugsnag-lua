@@ -162,7 +162,7 @@ end
 -- local rvn = raven:new(dsn, { app = { version = '0.0.1', releaseStage = 'Staging' }})
 function _M.new(self, apiKey, conf)
    if not apiKey then
-      return nil, "empty apiKey"
+      return nil, "empty api-key"
    end
 
    local obj = {
