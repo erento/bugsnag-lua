@@ -40,10 +40,28 @@ local string_find    = string.find
 local string_sub     = string.sub
 local table_insert   = table.insert
 
+local payload_version = '2'
 local debug = false
-
 local socket
 local catcher_trace_level = 4
+
+math.randomseed(os_time())
+
+-- prepare metatables.
+local _M = {
+  notifier = {
+   url = "https://github.com/APItools/bugsnag-lua",
+   name = "Bugsnag Lua",
+   version = "0.1"
+  }
+}
+local mt = {
+   __index = _M
+}
+local _json = {}
+local _exception = {{}}
+
+-- check if nginx exists.
 if not ngx then
    local ok, luasocket = pcall(require, "socket")
    if not ok then
@@ -54,11 +72,13 @@ else
    socket = ngx.socket
 end
 
+-- check for env for table.new.
 local ok, new_tab = pcall(require, "table.new")
 if not ok then
     new_tab = function (narr, nrec) return {} end
 end
 
+-- check if env for table.clear.
 local ok, clear_tab = pcall(require, "table.clear")
 if not ok then
    clear_tab = function(tab)
@@ -68,6 +88,7 @@ if not ok then
    end
 end
 
+-- log: log output to print of nginx.
 local function log(...)
    if not ngx then
       print(...)
@@ -76,7 +97,7 @@ local function log(...)
    end
 end
 
--- backup logging when cannot send data to Sentry
+-- backup logging when cannot send data to bugsnag.
 local function errlog(...)
    if not ngx then
       print("[ERROR]", ...)
@@ -85,22 +106,11 @@ local function errlog(...)
    end
 end
 
-local _json = {}
-
-local _exception = { {} }
-
-local _M = {}
-
-local mt = {
-   __index = _M,
-}
-
-math.randomseed(os_time())
 
 -- hexrandom: returns a random number in hex with the specified number
--- of digits
+-- of digits.
 local function hexrandom(digits)
-   local s = ''
+   local s = ""
    for i=1,digits do
       s = s .. string_format("%0x", math_random(1,16)-1)
    end
@@ -108,23 +118,10 @@ local function hexrandom(digits)
 end
 
 -- uuid4: create a UUID in Version 4 format as a string albeit without
--- the -s separating fields
+-- the -s separating fields.
 local function uuid4()
    return string_format("%s4%s8%s%s", hexrandom(12), hexrandom(3),
       hexrandom(3), hexrandom(12))
-end
-
--- iso8601: returns the current date/time in ISO8601 format with no
--- timezone indicator but in UTC
-local function iso8601()
-
-   -- The ! forces os_date to return UTC. Don't change this to use
-   -- os.date/os.time to format the date/time because timezone
-   -- problems occur
-
-   local t = os_date("!*t")
-   return string_format("%04d-%02d-%02dT%02d:%02d:%02d",
-      t["year"], t["month"], t["day"], t["hour"], t["min"], t["sec"])
 end
 
 -- _get_server_name: returns current nginx server name if ngx_lua is used.
@@ -133,9 +130,9 @@ local function _get_server_name()
    return ngx and ngx.var.server_name or "undefined"
 end
 
+-- backtrace: trace back the error.
 local function backtrace(level)
    local frames = {}
-
    level = level + 1
 
    while true do
@@ -152,53 +149,36 @@ local function backtrace(level)
 
       level = level + 1
    end
-   return frames
+    return frames
 end
 
-local notifier = {
-   name = "Bugsnag Lua",
-   version = "0.1",
-   url = "https://github.com/APItools/bugsnag-lua"
-}
-_M.notifier = notifier
 --- Create a new Sentry client. Three parameters:
 -- @param self raven client
--- @param dsn  The DSN of the Sentry instance with this format:
---             <pre>{PROTOCOL}://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PATH}{PROJECT_ID}</pre>
---             Both HTTP protocol and UDP protocol are supported. For example:
---             <pre>http://pub:secret@127.0.0.1:8080/sentry/proj-id</pre>
---             <pre>udp://pub:secret@127.0.0.1:8080/sentry/proj-id</pre>
--- @param conf client configuration. Conf should be a hash table. Possiable
---             keys are: "tags", "logger". For example:
---             <pre>{ tags = { foo = "bar", abc = "def" }, logger = "myLogger" }</pre>
+-- @param conf client configuration. Conf should be a hash table.
+--             <pre>{ app = { version = '0.0.1', releaseStage = 'Staging' }}</pre>
 -- @return     a new raven instance
 -- @usage
 -- local raven = require "raven"
--- local rvn = raven:new(dsn, { tags = { foo = "bar", abc = "def" },
---     logger = "myLogger" })
+-- local rvn = raven:new(dsn, { app = { version = '0.0.1', releaseStage = 'Staging' }})
 function _M.new(self, apiKey, conf)
    if not apiKey then
       return nil, "empty apiKey"
    end
 
-   local obj = {}
-
-   obj.client_id = "bugsnag-lua/0.1"
-   obj.apiKey = apiKey
-   -- default level "error"
-   obj.level = "error"
-   obj.host = 'notify.bugsnag.com'
-   obj.port = 80
-   obj.protocol = 'http'
-   obj.request_uri = '/'
-   obj.notifier = notifier
-
+   local obj = {
+     client_id = string_format("bugsnag-lua/%s", _M.notifier.version),
+     apiKey = apiKey,
+     level = "error",
+     protocol = "https",
+     host = "notify.bugsnag.com",
+     request_uri = "/",
+     notifier = _M.notifier
+   }
    if conf then
-      for key,value in pairs(conf) do
+      for key, value in pairs(conf) do
          obj[key] = value
       end
    end
-
    return setmetatable(obj, mt)
 end
 
@@ -304,9 +284,6 @@ function _M.send_report(self, exception, conf)
       notifier  = self.notifier
    }
 
-   -- TODO: Why is this line commented out?
-   --json.project   = self.project_id,
-
    if not exception then
       exception = self.exception
       if not exception then
@@ -314,17 +291,14 @@ function _M.send_report(self, exception, conf)
       end
    end
 
-   local event = {
-      exceptions = { exception }
-   }
+   local event = { exceptions = { exception } }
+   if self.app then
+     event.app = self.app
+   end
+   -- add payload version.
+   event.payloadVersion = payload_version
+   event.device = { hostname = _get_server_name() }
    payload.events = { event }
-
-   event.payloadVersion = '2'
-   -- exception.timestamp = iso8601()
-   -- payload.level     = self.level
-   -- payload.tags      = self.tags
-   -- payload.platform  = "lua"
-   -- payload.logger    = "root"
 
    if conf then
       if conf.tags then
@@ -334,19 +308,18 @@ function _M.send_report(self, exception, conf)
             payload.tags[#payload.tags + 1] = conf.tags
          end
       end
-
       if conf.level then
          payload.level = conf.level
       end
    end
 
-   -- payload.server_name = _get_server_name()
+   print(json_encode(payload))
 
    local json_str = json_encode(payload)
    local ok, err = self:http_send(json_str)
 
    if not ok then
-      errlog("Failed to send to Sentry: ", err, " ",  json_str)
+      errlog("Failed to send to bugsnag: ", err, " ",  json_str)
       return nil, err
    end
    return ok
@@ -361,14 +334,14 @@ function _M.get_culprit(level)
    if info.name then
       culprit = info.name
    else
-      culprit = info.short_src .. ":" .. info.linedefined
+     culprit = format("%s:%s", info.short_src, info.linedefined)
    end
    return culprit
 end
 
 function _M.split_error(exception)
    -- extract message from errors like: "raven.lua:545: attempt to concatenate a nil value"
-   local file,message = string_match(exception, '^([^%.]+%.%w+):%d+:%s*(.+)$')
+   local file,message = string_match(exception, "^([^%.]+%.%w+):%d+:%s*(.+)$")
    return file,message
 end
 
