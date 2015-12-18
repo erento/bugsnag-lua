@@ -2,7 +2,7 @@ bugsnag-lua [![Build Status](https://travis-ci.org/APItools/bugsnag-lua.svg?bran
 =========
 
 A small Lua interface to [Bugsnag](http://bugsnag.com/) that supports
-the HTTP notification interface and also has a helpful wrapper function
+the HTTPS notification interface and also has a helpful wrapper function
 `call()` that takes any arbitrary Lua function (with arguments) and executes
 it, traps any errors and reports it automatically to Bugsnag.
 
@@ -13,7 +13,7 @@ Synopsis
 
     local bugsnag = require "raven"
 
-    local bug = bugsnag:new("api-key", {app = { version = "0.0.1"}})
+    local bug = bugsnag:new("api-key", {app = { version = "0.0.1" } })
 
     -- Send a message to sentry
     local ok, err = bug:captureMessage(
