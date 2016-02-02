@@ -149,7 +149,7 @@ end
 -- local rvn = raven:new(dsn, { app = { version = '0.0.1', releaseStage = 'Staging' }})
 function _M.new(self, apiKey, conf)
   if not apiKey then
-return nil, "empty api-key"
+    return nil, "empty api-key"
   end
 
   local obj = {
@@ -324,8 +324,8 @@ function _M.get_culprit(level)
 end
 
 function _M.split_error(exception)
-  -- extract message from errors like: "raven.lua:545: attempt to concatenate a nil value"
-  local file,message = string_match(exception, "^([^%.]+%.%w+):%d+:%s*(.+)$")
+  -- extract message from errors like: "/usr/share/lua/5.1/raven.lua:545: attempt to concatenate a nil value"
+  local file,message = string_match(exception, "^(%g+):%d+:%s*(.+)$")
   return file,message
 end
 
