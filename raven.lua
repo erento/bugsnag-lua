@@ -284,9 +284,12 @@ function _M.send_report(self, exception, conf)
   -- add payload version.
   event.payloadVersion = payload_version
   event.device = { hostname = _get_server_name() }
-  payload.events = { event }
 
   if conf then
+    if conf.metaData then
+      event.metaData = conf.metaData
+    end
+
     if conf.tags then
       if not payload.tags then
         payload.tags = { conf.tags }
@@ -298,6 +301,8 @@ function _M.send_report(self, exception, conf)
       payload.level = conf.level
     end
   end
+
+  payload.events = { event }
 
   local json_str = json_encode(payload)
   local ok, err = self:http_send(json_str)
